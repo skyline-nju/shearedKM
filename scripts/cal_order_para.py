@@ -125,6 +125,6 @@ if __name__ == "__main__":
     # phi_vs_T_varied_L(L_arr, gamma, rho0, Dt, sigma=0)
 
 
-    L = 128
-    gamma = 0.002
+    L = 512
+    gamma = 0.01
     plot_time_series(L, 1.5, 0.01, 0.3, gamma=gamma, sigma=0, h=0.05, seed=3001)
