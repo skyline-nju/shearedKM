@@ -97,7 +97,7 @@ public:
   ~Snap_GSD_2();
 
   template <typename TPar>
-  void get_data_from_par(const std::vector<TPar>& p_arr, float* pos, float* psi, float* omega);
+  void get_data_from_par(const std::vector<TPar>& p_arr, float* pos, float* omega);
 
   uint64_t get_time_step();
 
@@ -107,10 +107,10 @@ public:
   void dump(int i_step, const std::vector<TPar>& p_arr);
 
   template <typename TFloat>
-  void read(int i_frame, TFloat* x, TFloat* y, TFloat* theta, TFloat* psi, TFloat* omega);
+  void read(int i_frame, TFloat* x, TFloat* y, TFloat* psi, TFloat* omega);
 
   template <typename TFloat>
-  void read_last_frame(TFloat* x, TFloat* y, TFloat* theta, TFloat* psi, TFloat* omega);
+  void read_last_frame(TFloat* x, TFloat* y, TFloat* psi, TFloat* omega);
 
   void ini(const std::string& filename, const std::string& open_flag, const Vec_2<double>& gl_l);
 
@@ -174,7 +174,6 @@ void OrderParaExporter::dump(int i_step, const std::vector<TPar>& birds) {
 template <typename TPar>
 void Snap_GSD_2::get_data_from_par(const std::vector<TPar>& p_arr,
                                    float* pos,
-                                   float* psi,
                                    float* omega) {
   int n_par = p_arr.size();
   int* n_par_arr = new int[tot_proc_]{};
@@ -194,7 +193,6 @@ void Snap_GSD_2::get_data_from_par(const std::vector<TPar>& p_arr,
   }
 
   float* my_pos = new float[n_par * 3];
-  float* my_psi = new float[n_par];
   float* my_omega = new float[n_par];
 
   double half_Lx = gl_l_.x * 0.5;
@@ -203,14 +201,10 @@ void Snap_GSD_2::get_data_from_par(const std::vector<TPar>& p_arr,
     int j3 = j * 3;
     my_pos[j3    ] = p_arr[j].pos.x - half_Lx;
     my_pos[j3 + 1] = p_arr[j].pos.y - half_Ly;
-    my_pos[j3 + 2] = p_arr[j].get_theta();
-    my_psi[j] = p_arr[j].get_psi();
+    my_pos[j3 + 2] = p_arr[j].get_psi();
     my_omega[j] = p_arr[j].omega;
   }
 
-  MPI_Gatherv(my_psi, n_par, MPI_FLOAT,
-              psi, n_par_arr, displs, MPI_FLOAT,
-              0, comm_);
   MPI_Gatherv(my_omega, n_par, MPI_FLOAT,
               omega, n_par_arr, displs, MPI_FLOAT,
               0, comm_);
@@ -227,7 +221,6 @@ void Snap_GSD_2::get_data_from_par(const std::vector<TPar>& p_arr,
   delete[] n_par_arr;
   delete[] displs;
   delete[] my_pos;
-  delete[] my_psi;
   delete[] my_omega;
 }
 
@@ -235,16 +228,14 @@ template<typename TPar>
 void Snap_GSD_2::dump(int i_step, const std::vector<TPar>& p_arr) {
   if (need_export(i_step)) {
     float* pos = nullptr;
-    float* psi = nullptr;
     float* omega = nullptr;
     
     if (my_rank_ == 0) {
       pos = new float[gl_np_ * 3];
-      psi = new float[gl_np_];
       omega = new float[gl_np_];
     }
 
-    get_data_from_par(p_arr, pos, psi, omega);
+    get_data_from_par(p_arr, pos, omega);
     uint32_t n_par = gl_np_;
     if (my_rank_ == 0) {
       //uint64_t step = get_time_step();
@@ -255,12 +246,10 @@ void Snap_GSD_2::dump(int i_step, const std::vector<TPar>& p_arr) {
       gsd_write_chunk(handle_, "configuration/step", GSD_TYPE_UINT64, 1, 1, 0, &step);
       gsd_write_chunk(handle_, "particles/N", GSD_TYPE_UINT32, 1, 1, 0, &n_par);
       gsd_write_chunk(handle_, "particles/position", GSD_TYPE_FLOAT, n_par, 3, 0, pos);
-      gsd_write_chunk(handle_, "particles/charge", GSD_TYPE_FLOAT, n_par, 1, 0, psi);
       gsd_write_chunk(handle_, "particles/mass", GSD_TYPE_FLOAT, n_par, 1, 0, omega);
       gsd_end_frame(handle_);
     }
     delete[] pos;
-    delete[] psi;
     delete[] omega;
   }
 }
@@ -268,7 +257,7 @@ void Snap_GSD_2::dump(int i_step, const std::vector<TPar>& p_arr) {
 
 template<typename TFloat>
 void io::Snap_GSD_2::read(int i_frame,
-                          TFloat* x, TFloat* y, TFloat* theta,
+                          TFloat* x, TFloat* y,
                           TFloat* psi, TFloat* omega) {
   if (my_rank_ == 0) {
     uint32_t n_par;
@@ -284,10 +273,6 @@ void io::Snap_GSD_2::read(int i_frame,
     chunk = gsd_find_chunk(handle_, i_frame, "particles/position");
     gsd_read_chunk(handle_, pos, chunk);
 
-    float* psi_in = new float[n_par];
-    chunk = gsd_find_chunk(handle_, i_frame, "particles/charge");
-    gsd_read_chunk(handle_, psi_in, chunk);
-
     float* omega_in = new float[n_par];
     chunk = gsd_find_chunk(handle_, i_frame, "particles/mass");
     gsd_read_chunk(handle_, omega_in, chunk);
@@ -297,15 +282,13 @@ void io::Snap_GSD_2::read(int i_frame,
     for (int i = 0; i < n_par; i++) {
       x[i] = pos[i * 3 + 0] + half_Lx;
       y[i] = pos[i * 3 + 1] + half_Ly;
-      theta[i] = pos[i * 3 + 2];
+      psi[i] = pos[i * 3 + 2];
       tangle_1D(x[i], gl_l_.x);
       tangle_1D(y[i], gl_l_.y);
 
-      psi[i] = psi_in[i];
       omega[i] = omega_in[i];
     }
     delete[] pos;
-    delete[] psi_in;
     delete[] omega_in;
   }
 }
@@ -313,7 +296,7 @@ void io::Snap_GSD_2::read(int i_frame,
 
 template<typename TFloat>
 void io::Snap_GSD_2::read_last_frame(TFloat* x, TFloat* y, 
-                                     TFloat* theta, TFloat* psi,
+                                     TFloat* psi,
                                      TFloat* omega) {
   if (my_rank_ == 0) {
     int nframes = gsd_get_nframes(handle_);
@@ -321,7 +304,7 @@ void io::Snap_GSD_2::read_last_frame(TFloat* x, TFloat* y,
       std::cout << "Error, nframes=" << nframes << std::endl;
       exit(1);
     } else {
-      read(nframes - 1, x, y, theta, psi, omega);
+      read(nframes - 1, x, y, psi, omega);
     }
   }
 }

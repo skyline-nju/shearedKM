@@ -32,26 +32,32 @@ void ini(std::vector<TPar>& p_arr, const TDomain& dm, TCellList& cl,
 
   double* x = new double[n_gl] {};
   double* y = new double[n_gl] {};
-  double* theta = new double[n_gl] {};
   double* psi = new double[n_gl] {};
   double* omega = new double[n_gl] {};
 
   if (my_rank == 0) {
-    if (ini_mode == "bimodal") {
+    if (ini_mode == "rand" || ini_mode == "ordered") {
       for (size_t i = 0; i < n_gl; i++) {
         x[i] = myran.doub() * dm.gl_l().x;
         y[i] = myran.doub() * dm.gl_l().y;
-        theta[i] = M_PI * myran.doub() * 2;
-        psi[i] = M_PI * myran.doub() * 2;
         if (i < n_gl / 2) {
           omega[i] = sigma;
         } else {
           omega[i] = -sigma;
         }
       }
+      if (ini_mode == "rand") {
+        for (size_t i = 0; i < n_gl; i++) {
+          psi[i] = myran.doub() * PI * 2;
+        }
+      } else {
+        for (size_t i = 0; i < n_gl; i++) {
+          psi[i] = 0.;
+        }
+      }
       std::cout << "Create " << n_gl << " particles with random pos and ori" << std::endl;
     } else if (ini_mode == "resume") {
-      gsd.read_last_frame(x, y, theta, psi, omega);
+      gsd.read_last_frame(x, y, psi, omega);
     } else {
       std::cout << "ini_mode need be one of rand or resume" << std::endl;
       exit(1);
@@ -61,7 +67,6 @@ void ini(std::vector<TPar>& p_arr, const TDomain& dm, TCellList& cl,
   MPI_Barrier(dm.comm());
   MPI_Bcast(x, n_gl, MPI_DOUBLE, 0, dm.comm());
   MPI_Bcast(y, n_gl, MPI_DOUBLE, 0, dm.comm());
-  MPI_Bcast(theta, n_gl, MPI_DOUBLE, 0, dm.comm());
   MPI_Bcast(psi, n_gl, MPI_DOUBLE, 0, dm.comm());
   MPI_Bcast(omega, n_gl, MPI_DOUBLE, 0, dm.comm());
 
@@ -72,7 +77,6 @@ void ini(std::vector<TPar>& p_arr, const TDomain& dm, TCellList& cl,
       p_arr.push_back(TPar());
       p_arr[j].pos.x = x[i];
       p_arr[j].pos.y = y[i];
-      p_arr[j].theta = theta[i];
       p_arr[j].psi = psi[i];
       p_arr[j].omega = omega[i];
     }
@@ -93,7 +97,6 @@ void ini(std::vector<TPar>& p_arr, const TDomain& dm, TCellList& cl,
   MPI_Barrier(dm.comm());
   delete[] x;
   delete[] y;
-  delete[] theta;
   delete[] psi;
   delete[] omega;
 }
@@ -102,10 +105,9 @@ void ini(std::vector<TPar>& p_arr, const TDomain& dm, TCellList& cl,
 
 
 void run(const Vec_2<double>& gl_l,
-         double rho0, double sigma,
-         double D_theta, double D_psi,
-         double h, double v0,
-         int n_step, int snap_dt, double snap_log_sep,
+         double rho0, double Dt, double T,
+         double gamma, double sigma,
+         double h, int n_step, int snap_dt, double snap_log_sep,
          const std::string& ini_mode,
          unsigned long long seed,
          const Vec_2<int>& proc_size,

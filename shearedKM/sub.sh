@@ -21,7 +21,6 @@ do
 #SBATCH -N 1 -n 1
 #SBATCH --hint=nomultithread
 
-
 srun ./a.out $rho0 $T $D_theta $sigma $h $n_step $snap_dt $seed $IC
 EOF
 sleep 0.25

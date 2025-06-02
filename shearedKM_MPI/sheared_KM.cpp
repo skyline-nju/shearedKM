@@ -1,23 +1,28 @@
 #include "sheared_KM.h"
 
 void run(const Vec_2<double>& gl_l,
-         double rho0, double sigma,
-         double D_theta, double D_psi,
-         double h, double v0,
-         int n_step, int snap_dt, double snap_log_sep,
+         double rho0, double Dt, double T,
+         double gamma, double sigma,
+         double h, int n_step, int snap_dt, double snap_log_sep,
          const std::string& ini_mode,
          unsigned long long seed,
          const Vec_2<int>& proc_size,
          MPI_Comm group_comm) {
-  typedef BiNode<ActiveOscillator_2> node_t;
+  typedef BiNode<PassiveOscillator_2> node_t;
   int my_rank, tot_proc;
   MPI_Comm_rank(group_comm, &my_rank);
   MPI_Comm_size(group_comm, &tot_proc);
   std::vector<node_t> p_arr;
   const double r_cut = 1.0;
 
+  if (proc_size.x != 1) {
+    if (my_rank == 0) {
+      std::cout << "Error, proc_size.x must be 1" << std::endl;
+      exit(1);
+    }
+  }
   Grid_2 grid(gl_l, r_cut, proc_size, group_comm);
-  PeriodicDomain_2 dm(gl_l, grid, proc_size, group_comm);
+  LeesEdwardsDomain_2 dm(gl_l, grid, proc_size, group_comm);
   CellListNode_2<node_t> cl(dm, grid);
   Communicator_2 comm(dm, grid, rho0, 20.);
 
@@ -38,8 +43,6 @@ void run(const Vec_2<double>& gl_l,
     //cl.for_each_pair_fast(f1, f3);
     };
 
-
-
   // set output
   char basename[255];
   char log_file[255];
@@ -49,7 +52,7 @@ void run(const Vec_2<double>& gl_l,
   char folder[] = "data\\";
 #else
   char folder[255];
-  snprintf(folder, 255, "/home/ps/data/motile_KM/bimodal/L%g/", gl_l.x);
+  snprintf(folder, 255, "/home/ps/data/sheared_KM/scalingMPI/L%g/", gl_l.x);
 #endif
 
   char log_folder[255];
@@ -61,8 +64,8 @@ void run(const Vec_2<double>& gl_l,
     mkdir(op_folder);
   }
 
-  snprintf(basename, 255, "L%g_%g_r%g_v%g_T%g_s%g_D%.4f_h%g_S%d",
-           gl_l.x, gl_l.y, rho0, v0, D_psi, sigma, D_theta, h, seed);
+  snprintf(basename, 255, "L%g_%g_r%g_Dt%g_T%g_g%g_s%g_h%g_S%d",
+           gl_l.x, gl_l.y, rho0, Dt, T, gamma, sigma, h, seed);
   snprintf(gsd_file, 255, "%s%s.gsd", folder, basename);
 
   int log_dt = 10000;
@@ -84,7 +87,7 @@ void run(const Vec_2<double>& gl_l,
   ini(p_arr, dm, cl, rho0, sigma, ini_mode, myran, gsd, 20.);
 
   // ini integrator
-  MotileOscillatorEM integrator(h, D_theta, D_psi, v0);
+  ShearedOscillatorEM integrator(h, Dt, T, gamma);
 
   auto one_par_move = [&integrator, &dm, &myran, h](node_t& p) {
     integrator.update(p, dm, myran);
@@ -92,19 +95,9 @@ void run(const Vec_2<double>& gl_l,
 
   // run
   for (int t = 1; t <= n_step; t++) {
-    cal_force(p_arr, cl, comm, for_all_pair_force);
-
-#ifdef POS_OMEGA
-    for (auto& p : p_arr) {
-      if (p.pos.x < gl_l.x * 0.5) {
-        p.omega = sigma;
-      } else {
-        p.omega = -sigma;
-      }
-    }
-#endif
-
-    integrate(p_arr, cl, one_par_move, comm);
+    dm.update_dx(t * h, gamma);
+    cal_force(p_arr, cl, comm, for_all_pair_force, dm);
+    integrate(p_arr, cl, one_par_move, comm, dm);
     gsd.dump(t, p_arr);
     log.record(t);
     op.dump(t, p_arr);

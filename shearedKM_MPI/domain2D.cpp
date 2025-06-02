@@ -82,7 +82,12 @@ void Domain_2::find_neighbor(int (*neighbor)[2]) const {
   }
 }
 
-
+/**
+ * @brief Domain with periodic boundary condition in two dimension.
+ *
+ * Use flag_PBC_ to indicate whether the periodic bondary condition is applied
+ * along x and y direction.
+ */
 PeriodicDomain_2::PeriodicDomain_2(const Vec_2<double>& gl_l,
                                    const Grid_2& grid,
                                    const Vec_2<int>& proc_size,
@@ -97,4 +102,129 @@ PeriodicDomain_2::PeriodicDomain_2(const Vec_2<double>& gl_l,
       << ", " << l_.y << ")" << std::endl;
   }
   MPI_Barrier(group_comm);
+}
+
+void PeriodicDomain_2::tangle(Vec_2<double>& pos) const {
+  if (flag_PBC_.x) {
+    tangle_1D(pos.x, gl_l_.x);
+  }
+  if (flag_PBC_.y) {
+    tangle_1D(pos.y, gl_l_.y);
+  }
+}
+
+void PeriodicDomain_2::untangle(Vec_2<double>& r12_vec) const {
+  if (flag_PBC_.x) {
+    if (r12_vec.x < -gl_half_l_.x) {
+      r12_vec.x += gl_l_.x;
+    } else if (r12_vec.x > gl_half_l_.x) {
+      r12_vec.x -= gl_l_.x;
+    }
+  }
+  if (flag_PBC_.y) {
+    if (r12_vec.y < -gl_half_l_.y) {
+      r12_vec.y += gl_l_.y;
+    } else if (r12_vec.y > gl_half_l_.y) {
+      r12_vec.y -= gl_l_.y;
+    }
+  }
+}
+
+
+/**
+ * @brief Domain with Lees-Edwards boundary condition in two dimension.
+ *
+ * The whole system is divides into (1, my) subdomains, such that each
+ * domain has peoriodic boundary condition along the x direction, but
+ * not along the y direction.
+ */
+LeesEdwardsDomain_2::LeesEdwardsDomain_2(const Vec_2<double>& gl_l,
+                                         const Grid_2& grid,
+                                         const Vec_2<int>& proc_size,
+                                         MPI_Comm group_comm,
+                                         double t_start)
+  : Domain_2(gl_l, grid, proc_size, group_comm), t_start_(t_start) {
+  gl_half_l_.x = gl_l.x * 0.5;
+  gl_half_l_.y = gl_l.y * 0.5;
+  flag_PBC_.x = proc_size_.x == 1;
+  flag_PBC_.y = proc_size_.y == 1;
+  if (proc_rank_.x == 0 and proc_rank_.y == 0) {
+    std::cout << "create " << proc_size.x << " by " << proc_size.y 
+      << " domains with Lees-Edwards boundary conditions, each of which has size ("
+      << l_.x << ", " << l_.y << ")" << std::endl;
+  }
+  MPI_Barrier(group_comm);
+}
+
+void LeesEdwardsDomain_2::update_dx(double t_now, double gamma) {
+  double dt = t_now - t_start_;
+  dx_ = fmod(gamma * gl_l_.y * dt + gl_half_l_.x, gl_l_.x) - gl_half_l_.x;
+}
+
+void LeesEdwardsDomain_2::tangle(Vec_2<double>& pos) const {
+  if (flag_PBC_.y) {
+    if (pos.y < 0.) { // y=0 boundary is crossed
+      pos.y += gl_l_.y;
+      pos.x += dx_;
+    } else if (pos.y >= gl_l_.y) {  // y=Ly boundary is crossed
+      pos.y -= gl_l_.y;
+      pos.x -= dx_;
+    }
+  }
+  if (flag_PBC_.x) {
+    if (pos.x < 0.) {
+      pos.x += gl_l_.x;
+    } else if (pos.x >= gl_l_.x) {
+      pos.x -= gl_l_.x;
+    }
+  }
+
+}
+
+
+/* Shift particle position when copied between top and bottom subdomains
+*  Note that there are (1, my) subdomains.
+*  offset.y > 0: bottom --> top
+*  offset.y < 0: top --> bottom
+*  offset.y == 0: no shift
+*/
+void LeesEdwardsDomain_2::tangle(Vec_2<double>& pos, const Vec_2<double>& offset) const {
+  if (offset.y > 0.) { // y=0 boundary is crossed
+    pos.y += gl_l_.y;
+    pos.x += dx_;
+    if (pos.x < 0.) {
+      pos.x += gl_l_.x;
+    } else if (pos.x >= gl_l_.x) {
+      pos.x -= gl_l_.x;
+    }
+  } else if (offset.y < 0.) { // y=Ly boundary is crossed
+    pos.y -= gl_l_.y;
+    pos.x -= dx_;
+    if (pos.x < 0.) {
+      pos.x += gl_l_.x;
+    } else if (pos.x >= gl_l_.x) {
+      pos.x -= gl_l_.x;
+    }
+  }
+}
+
+void LeesEdwardsDomain_2::untangle(Vec_2<double>& r12_vec) const {
+  if (flag_PBC_.y) {
+    if (r12_vec.y < -gl_half_l_.y) {
+      r12_vec.y += gl_l_.y;
+      r12_vec.x += dx_;
+    } else if (r12_vec.y > gl_half_l_.y) {
+      r12_vec.y -= gl_l_.y;
+      r12_vec.x -= dx_;
+    }
+  }
+
+  if (flag_PBC_.x) {
+    if (r12_vec.x < -gl_half_l_.x) {
+      r12_vec.x += gl_l_.x;
+    } else if (r12_vec.x > gl_half_l_.x) {
+      r12_vec.x -= gl_l_.x;
+    }
+  }
+
 }

@@ -44,27 +44,22 @@ void pack_ghost_par(char *buf, int &buf_size,
   buf_size = pos;
 }
 
-template <typename TNode>
+template <typename TNode, typename TDomain>
 void unpack_ghost_par(const char *buf, int buf_size,
                       CellListNode_2<TNode>& cl,
                       std::vector<TNode> &p_arr,
-                      int &n_ghost) {
-  //const Vec_2<double> offset = get_offset(Vec_2<double>(buf[0], buf[1]), cl);
-
+                      int &n_ghost, const TDomain& dm) {
   double tmp[2];
   std::memcpy(tmp, buf, 16);
   const Vec_2<double> offset = cl.get_pos_offset(Vec_2<double>(tmp[0], tmp[1]));
-  //if (offset.x != 0 && offset.y != 0) {
-  //  std::cout << "Error when unpack ghost par" << std::endl;
-  //  exit(1);
-  //}
 
   size_t pos = 0;
   while (pos < buf_size) {
     auto idx_last = p_arr.size();
     p_arr.push_back(TNode());
     p_arr[idx_last].copy_pos_psi_from(buf, pos);
-    p_arr[idx_last].pos += offset;
+    //p_arr[idx_last].pos += offset;
+    dm.tangle(p_arr[idx_last].pos, offset);
     cl.add_node(p_arr[idx_last]);
     n_ghost++;
   }
@@ -93,19 +88,15 @@ void pack_leaving_par(const std::vector<TNode> &p_arr,
   buf_size = buf_pos;
 }
 
-template <typename TNode>
+template <typename TNode, typename TDomain>
 void unpack_arrived_par(const char *buf, int buf_size,
                         CellListNode_2<TNode>& cl,
                         std::vector<TNode> &p_arr,
-                        std::vector<int> &vacant_pos) { //! should be sorted in descending order
-  //const Vec_2<double> offset = cl.get_pos_offset(Vec_2<double>(buf[0], buf[1]));
+                        std::vector<int> &vacant_pos,  //! should be sorted in descending order
+                        const TDomain& dm) {
   double tmp[2];
   std::memcpy(tmp, buf, 16);
   const Vec_2<double> offset = cl.get_pos_offset(Vec_2<double>(tmp[0], tmp[1]));
-  //if (offset.x != 0 && offset.y != 0) {
-  //  std::cout << "Error when unpack arrived par" << std::endl;
-  //  exit(1);
-  //}
   size_t buf_pos = 0;
   while (buf_pos < buf_size) {
     int idx;
@@ -117,7 +108,8 @@ void unpack_arrived_par(const char *buf, int buf_size,
       vacant_pos.pop_back();
     }
     p_arr[idx].copy_from(buf, buf_pos);
-    p_arr[idx].pos += offset;
+    //p_arr[idx].pos += offset;
+    dm.tangle(p_arr[idx].pos, offset);
     cl.add_node(p_arr[idx]);
   }
 }
@@ -148,14 +140,14 @@ public:
                          const RectBlock_2<int> &prev_block, const RectBlock_2<int> &next_block,
                          TPack pack, TUnpack unpack, TFunc do_sth);
 
-  template <typename TNode>
-  void comm_before_cal_force(std::vector<TNode> &p_arr, CellListNode_2<TNode> &cl, int& n_ghost);
+  template <typename TNode, typename TDomain>
+  void comm_before_cal_force(std::vector<TNode> &p_arr, CellListNode_2<TNode> &cl, int& n_ghost, const TDomain& dm);
 
   template <typename TNode>
   void clear_padded_particles(CellListNode_2<TNode> &cl, std::vector<TNode> &p_arr, int n_ghost);
 
-  template <typename TNode>
-  void comm_after_integration(std::vector<TNode> &p_arr, CellListNode_2<TNode>& cl);
+  template <typename TNode, typename TDomain>
+  void comm_after_integration(std::vector<TNode> &p_arr, CellListNode_2<TNode>& cl, const TDomain& dm);
 
 private:
   int tot_proc_ = 1;
@@ -290,22 +282,23 @@ void Communicator_2::exchange_particle(int prev_proc, int next_proc, int tag_bw,
   MPI_Wait(&req[3], &stat[3]);
 }
 
-template <typename TNode>
+template <typename TNode, typename TDomain>
 void Communicator_2::comm_before_cal_force(std::vector<TNode>& p_arr,
-                                           CellListNode_2<TNode>& cl, int& n_ghost) {
+                                           CellListNode_2<TNode>& cl, int& n_ghost,
+                                           const TDomain& dm) {
   n_ghost = 0;
   auto pack = [&cl](char *buf, int &buf_size, const RectBlock_2<int>& block) {
     pack_ghost_par(buf, buf_size, cl, block);
   };
 
-  auto unpack = [&n_ghost, &cl, &p_arr](char *buf, int buf_size) {
+  auto unpack = [&n_ghost, &cl, &p_arr, &dm](char *buf, int buf_size) {
     //size_t new_size = buf_size / 17 + p_arr.size();
     size_t new_size = buf_size / 24 + p_arr.size();
 
     if (new_size > p_arr.capacity()) {
       cl.reserve_particles(p_arr, new_size);
     }
-    unpack_ghost_par(buf, buf_size, cl, p_arr, n_ghost);
+    unpack_ghost_par(buf, buf_size, cl, p_arr, n_ghost, dm);
   };
 
   for (int direction = 0; direction < 2; direction++) {
@@ -334,18 +327,20 @@ void Communicator_2::clear_padded_particles(CellListNode_2<TNode>& cl,
   }
 }
 
-template <typename TNode>
-void Communicator_2::comm_after_integration(std::vector<TNode>& p_arr, CellListNode_2<TNode>& cl) {
+template <typename TNode, typename TDomain>
+void Communicator_2::comm_after_integration(std::vector<TNode>& p_arr,
+                                            CellListNode_2<TNode>& cl,
+                                            const TDomain& dm) {
   auto pack = [&p_arr, this, &cl](char *buf, int &buf_size, const RectBlock_2<int>& block) {
     pack_leaving_par(p_arr, vacant_pos_, cl, block, buf, buf_size);
   };
 
-  auto unpack = [&p_arr, this, &cl](char *buf, int buf_size) {
-    int new_size = buf_size / 40 + p_arr.size() - vacant_pos_.size();
+  auto unpack = [&p_arr, this, &cl, &dm](char *buf, int buf_size) {
+    int new_size = buf_size / 32 + p_arr.size() - vacant_pos_.size();
     if (new_size > p_arr.capacity()) {
       cl.reserve_particles(p_arr, new_size);
     }
-    unpack_arrived_par(buf, buf_size, cl, p_arr, vacant_pos_);
+    unpack_arrived_par(buf, buf_size, cl, p_arr, vacant_pos_, dm);
   };
 
   auto sort_descending = [this]() {

@@ -44,11 +44,11 @@ void AlignKernal::operator()(TPar& p1, TPar& p2, const BdyCondi& bc) const {
 }
 
 
-template <typename TNode, typename TFunc>
+template <typename TNode, typename TFunc, typename TDomain>
 void cal_force(std::vector<TNode>& p_arr, CellListNode_2<TNode>& cl,
-               Communicator_2& comm, TFunc for_all_pair_force) {
+               Communicator_2& comm, TFunc for_all_pair_force, const TDomain& dm) {
   int n_ghost = 0;
-  comm.comm_before_cal_force(p_arr, cl, n_ghost);
+  comm.comm_before_cal_force(p_arr, cl, n_ghost, dm);
   for_all_pair_force();
   comm.clear_padded_particles(cl, p_arr, n_ghost);
 }

@@ -97,6 +97,7 @@ public:
                    const Vec_2<int>& proc_size, MPI_Comm group_comm);
 
   void tangle(Vec_2<double>& pos) const;
+
   void untangle(Vec_2<double>& v) const;
 
   void set_PBC() {} //TODO reset flag_PBC_ when there are walls 
@@ -105,28 +106,29 @@ protected:
   Vec_2<bool> flag_PBC_;
 };
 
-inline void PeriodicDomain_2::tangle(Vec_2<double>& pos) const {
-  if (flag_PBC_.x) {
-    tangle_1D(pos.x, gl_l_.x);
-  }
-  if (flag_PBC_.y) {
-    tangle_1D(pos.y, gl_l_.y);
-  }
-}
 
-inline void PeriodicDomain_2::untangle(Vec_2<double>& r12_vec) const {
-  if (flag_PBC_.x) {
-    if (r12_vec.x < -gl_half_l_.x) {
-      r12_vec.x += gl_l_.x;
-    } else if (r12_vec.x > gl_half_l_.x) {
-      r12_vec.x -= gl_l_.x;
-    }
-  }
-  if (flag_PBC_.y) {
-    if (r12_vec.y < -gl_half_l_.y) {
-      r12_vec.y += gl_l_.y;
-    } else if (r12_vec.y > gl_half_l_.y) {
-      r12_vec.y -= gl_l_.y;
-    }
-  }
-}
+/**
+ * @brief Domain with Lees-Edwards boundary condition in two dimension.
+ *
+ * The whole system is divides into (1, my) subdomains, such that each
+ * domain has peoriodic boundary condition along the x direction, but
+ * not along the y direction.
+ */
+class LeesEdwardsDomain_2 : public Domain_2 {
+public:
+  LeesEdwardsDomain_2(const Vec_2<double>& gl_l,
+                      const Grid_2& grid, const Vec_2<int>& proc_size, MPI_Comm group_comm,
+                      double t_start = 0);
+
+  void update_dx(double t_now, double gamma);
+  double get_dx() const { return dx_; }
+
+  void tangle(Vec_2<double>& pos) const;
+  void tangle(Vec_2<double>& pos, const Vec_2<double>& offset) const;
+  void untangle(Vec_2<double>& v) const;
+protected:
+  Vec_2<double> gl_half_l_;
+  Vec_2<bool> flag_PBC_;
+  double t_start_;
+  double dx_ = 0;
+};
